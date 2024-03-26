@@ -2,9 +2,9 @@ import 'constants.dart';
 import 'models/app_event.dart';
 import 'models/app_model.dart';
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:async';
 import 'package:usage_stats/usage_stats.dart';
 import 'package:android_package_manager/android_package_manager.dart';
 
@@ -25,7 +25,8 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   List<AppEvent> _appEvents = [];
   List<AppUsage> _appUsages = [];
-  int _selectedIndex = 1;
+  final List<AppUsage> _appConciseUsages = [];
+  int _selectedIndex = 0;
   final AndroidPackageManager _packageManager = AndroidPackageManager();
   final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey =
       GlobalKey<RefreshIndicatorState>();
@@ -35,9 +36,72 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshIndicatorKey.currentState
-          ?.show(); //calling the _getAppData() in onRefresh
+      _refreshIndicatorKey.currentState?.show();
     });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    var content = _buildListView();
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        appBar: AppBar(
+          title: const Text("Usage Log"),
+          actions: [
+            _selectedIndex == 0
+                ? IconButton(
+                    onPressed: _handleCopyBtnOnclick,
+                    icon: const Icon(Icons.copy))
+                : const SizedBox()
+          ],
+        ),
+        body: RefreshIndicator(
+          key: _refreshIndicatorKey,
+          onRefresh: _updateData,
+          child: Center(
+            child: content,
+          ),
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: () {
+            _controller.animateTo(
+              0.0,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+            );
+          },
+          mini: true,
+          child: const Icon(
+            Icons.arrow_upward,
+          ),
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          items: const <BottomNavigationBarItem>[
+            BottomNavigationBarItem(
+              icon: Icon(Icons.summarize),
+              label: 'Concise',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.topic),
+              label: 'All',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.stacked_bar_chart),
+              label: 'Raw',
+            ),
+          ],
+          currentIndex: _selectedIndex,
+          selectedItemColor: Colors.amber[800],
+          onTap: (int index) {
+            setState(() {
+              _selectedIndex = index;
+            });
+          },
+        ),
+      ),
+    );
   }
 
   bool _isResumedOrNonInteractive(AppEvent appEvent) {
@@ -45,13 +109,14 @@ class _MyAppState extends State<MyApp> {
         appEvent.eventType == "Screen Non-Interactive";
   }
 
-  Future<void> _getAppData() async {
+  Future<void> _updateData() async {
     UsageStats.grantUsagePermission();
 
     if (_appEvents.isNotEmpty) {
       setState(() {
-        _appEvents = [];
-        _appUsages = [];
+        _appEvents.clear();
+        _appUsages.clear();
+        _appConciseUsages.clear();
       });
     }
 
@@ -127,6 +192,15 @@ class _MyAppState extends State<MyApp> {
     setState(() {
       _appEvents = appEvents.reversed.toList();
       _appUsages = (appUsages..sort()).reversed.toList();
+
+      //only show each Screen Locked that is longer than certain min. and the activity before it
+      for (int i = 1; i < _appUsages.length; i++) {
+        if (_appUsages[i].appName == "Screen Locked" &&
+            (_appUsages[i].durationInSeconds >= conciseMinTimeInSeconds)) {
+          _appConciseUsages.add(_appUsages[i - 1]);
+          _appConciseUsages.add(_appUsages[i]);
+        }
+      }
     });
   }
 
@@ -141,28 +215,55 @@ class _MyAppState extends State<MyApp> {
         .join();
   }
 
-  String _handleLongPress(
-      List<AppModel> appModels, int index, BuildContext context) {
-    var startTime = _getRoundedTimeString(appModels[index].time);
-    var endTime = _getRoundedTimeString(appModels[index - 1].time);
+  String _getAppModelTimeText(List<AppModel> data, int index) {
+    if (index < data.length - 1) {
+      // if the time difference between this event and previous event  time is less than 5 minutes
+      Duration duration = data[index + 1].time.difference(data[index].time);
+      if (duration.inMinutes < 5) {
+        // add five minutes toe this event start time
+        data[index].time = data[index].time.add(const Duration(minutes: 5));
+      }
+    }
 
-    var result = '$startTime$endTime';
+    var startTimeText = _getRoundedTimeString(data[index].time);
+    var endTimeText = _getRoundedTimeString(data[index - 1].time);
 
-    return result;
+    return '$startTimeText$endTimeText';
+  }
+
+  /// Copies all event times that are between [sessionStartTime] and [sessionEndTime] onto clipboard.
+  void _handleCopyBtnOnclick() {
+    const sessionStartTime = TimeOfDay(hour: 23, minute: 0); // 23:00 (11:00 PM)
+    const sessionEndTime =
+        TimeOfDay(hour: 8, minute: 0); // 08:00 (8:00 AM) the next day
+    final copyText = <String>[];
+
+    for (var index = _appConciseUsages.length - 1; index > 0; index--) {
+      final durationInSeconds = _appConciseUsages[index].durationInSeconds;
+      final activityStartTime = _appConciseUsages[index].time;
+
+      final isAfterStartTime = activityStartTime.hour > sessionStartTime.hour ||
+          (activityStartTime.hour == sessionStartTime.hour &&
+              activityStartTime.minute > sessionStartTime.minute);
+      final isBeforeEndTime = activityStartTime.hour < sessionEndTime.hour ||
+          (activityStartTime.hour == sessionEndTime.hour &&
+              activityStartTime.minute < sessionEndTime.minute);
+
+      if (isAfterStartTime ||
+          isBeforeEndTime && durationInSeconds > conciseMinTimeInSeconds) {
+        copyText.add(_getAppModelTimeText(_appConciseUsages, index));
+      }
+    }
+
+    final clipboardData = ClipboardData(text: copyText.join(' '));
+    Clipboard.setData(clipboardData);
   }
 
   Widget _buildListView() {
     List<AppModel> appModels = [];
 
     if (_selectedIndex == 0) {
-      //only show each Screen Locked that is longer than 10 mins. and the activity before it
-      for (int i = 1; i < _appUsages.length; i++) {
-        if (_appUsages[i].appName == "Screen Locked" &&
-            (_appUsages[i].durationInSeconds >= 600)) {
-          appModels.add(_appUsages[i - 1]);
-          appModels.add(_appUsages[i]);
-        }
-      }
+      appModels = _appConciseUsages;
     }
 
     if (_selectedIndex == 1) {
@@ -182,7 +283,7 @@ class _MyAppState extends State<MyApp> {
             onLongPress: () async {
               if (index >= 1 && _selectedIndex == 0) {
                 await Clipboard.setData(ClipboardData(
-                    text: _handleLongPress(appModels, index, context)));
+                    text: _getAppModelTimeText(appModels, index)));
               }
             },
             child: Padding(
@@ -245,62 +346,5 @@ class _MyAppState extends State<MyApp> {
             ),
           );
         });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    var content = _buildListView();
-
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text("Usage Log"),
-        ),
-        body: RefreshIndicator(
-          key: _refreshIndicatorKey,
-          onRefresh: _getAppData,
-          child: Center(
-            child: content,
-          ),
-        ),
-        floatingActionButton: FloatingActionButton(
-          onPressed: () {
-            _controller.animateTo(
-              0.0,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-            );
-          },
-          mini: true,
-          child: const Icon(
-            Icons.arrow_upward,
-          ),
-        ),
-        bottomNavigationBar: BottomNavigationBar(
-          items: const <BottomNavigationBarItem>[
-            BottomNavigationBarItem(
-              icon: Icon(Icons.summarize),
-              label: 'Concise',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.topic),
-              label: 'All',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.stacked_bar_chart),
-              label: 'Raw',
-            ),
-          ],
-          currentIndex: _selectedIndex,
-          selectedItemColor: Colors.amber[800],
-          onTap: (int index) {
-            setState(() {
-              _selectedIndex = index;
-            });
-          },
-        ),
-      ),
-    );
   }
 }
