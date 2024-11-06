@@ -109,6 +109,12 @@ class _MyAppState extends State<MyApp> {
         appEvent.eventType == "Screen Non-Interactive";
   }
 
+  bool _isPausedOrStoppedOrKeyguardHidden(AppEvent appEvent) {
+    return appEvent.eventType == "Activity Paused" ||
+        appEvent.eventType == "Activity Stopped" ||
+        appEvent.eventType == "Keyguard Hidden";
+  }
+
   Future<void> _updateData() async {
     UsageStats.grantUsagePermission();
 
@@ -155,19 +161,20 @@ class _MyAppState extends State<MyApp> {
     }
 
     appNameToAppEventMap.forEach(
-      (String appName, List<AppEvent> list) {
-        for (int x = 0; x < list.length; x++) {
-          var eventX = list[x];
+      (String appName, List<AppEvent> events) {
+        for (int x = 0; x < events.length; x++) {
+          var eventX = events[x];
 
           if (_isResumedOrNonInteractive(eventX)) {
             int y = x + 1;
 
-            while (y < list.length && _isResumedOrNonInteractive(list[y])) {
+            while (y < events.length &&
+                _isPausedOrStoppedOrKeyguardHidden(events[y])) {
               y++;
             }
 
-            if (y < list.length) {
-              var eventY = list[y];
+            if (y < events.length) {
+              var eventY = events[y];
               Duration duration = eventY.time.difference(eventX.time);
               int durationInSeconds = duration.inSeconds;
 
@@ -233,9 +240,9 @@ class _MyAppState extends State<MyApp> {
 
   /// Copies all event times that are between [sessionStartTime] and [sessionEndTime] onto clipboard.
   void _handleCopyBtnOnclick() {
-    const sessionStartTime = TimeOfDay(hour: 23, minute: 0); // 23:00 (11:00 PM)
+    const sessionStartTime = TimeOfDay(hour: 22, minute: 0); // 10:00 PM
     const sessionEndTime =
-        TimeOfDay(hour: 8, minute: 0); // 08:00 (8:00 AM) the next day
+        TimeOfDay(hour: 9, minute: 0); // 9:00 AM the next day
     final copyText = <String>[];
 
     for (var index = _appConciseUsages.length - 1; index > 0; index--) {
