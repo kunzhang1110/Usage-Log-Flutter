@@ -115,6 +115,12 @@ class _MyAppState extends State<MyApp> {
         appEvent.eventType == "Keyguard Hidden";
   }
 
+  Future<Uint8List> _loadIcon(String name) async {
+    // Replace with actual logic to load a default icon from assets
+    final ByteData data = await rootBundle.load('assets/$name');
+    return data.buffer.asUint8List();
+  }
+
   Future<void> _updateData() async {
     UsageStats.grantUsagePermission();
 
@@ -135,22 +141,38 @@ class _MyAppState extends State<MyApp> {
 
     List<AppEvent> appEvents = [];
     List<AppUsage> appUsages = [];
+    List<AppUsage> appConciseUsages = [];
     Map<String, List<AppEvent>> appNameToAppEventMap = {};
 
+    // retrieve all events to appEvents and appNameToAppEventMap
     for (var event in queryEvents) {
       var packageName = event.packageName;
       var eventType = eventTypeMap[int.parse(event.eventType!)];
       if (eventType == null || packageName == null) continue;
 
-      var appEvent = AppEvent(
-        appName: await _packageManager.getApplicationLabel(
+      var appEvent = AppEvent.empty();
+      appEvent.eventType = eventType;
+      appEvent.time = DateTime.fromMillisecondsSinceEpoch(
+          int.parse(event.timeStamp!));
+
+      try {
+        var appName =
+            await _packageManager.getApplicationLabel(packageName: packageName);
+        if (appNameExcludedList.contains(appName)) continue;
+        appEvent.appName = appName ?? packageName;
+      } catch (e) {
+        print(e);
+        appEvent.appName = packageName;
+      }
+
+      try {
+        appEvent.appIconByte = await _packageManager.getApplicationIcon(
                 packageName: packageName) ??
-            packageName,
-        appIconByte:
-            await _packageManager.getApplicationIcon(packageName: packageName),
-        eventType: eventType,
-        time: DateTime.fromMillisecondsSinceEpoch(int.parse(event.timeStamp!)),
-      );
+            await _loadIcon("default-icon.svg");
+      } catch (e) {
+        print(e);
+        appEvent.appIconByte = await _loadIcon("default-icon.svg");
+      }
 
       if (eventTypeForDurationList.contains(eventType)) {
         appNameToAppEventMap
@@ -160,6 +182,7 @@ class _MyAppState extends State<MyApp> {
       appEvents.add(appEvent);
     }
 
+    // calculate app usages
     appNameToAppEventMap.forEach(
       (String appName, List<AppEvent> events) {
         for (int x = 0; x < events.length; x++) {
@@ -196,9 +219,29 @@ class _MyAppState extends State<MyApp> {
       },
     );
 
+    appUsages.sort();
+
+    // merge  consecutive activities with the same name
+    AppUsage? previousAppUsage;
+    for (int i = 0; i < appUsages.length;) {
+      AppUsage currentAppUsage = appUsages[i];
+
+      if (previousAppUsage != null &&
+          previousAppUsage.appName == currentAppUsage.appName) {
+        previousAppUsage.durationInSeconds =
+            previousAppUsage.durationInSeconds +
+                currentAppUsage.durationInSeconds;
+
+        appUsages.removeAt(i);
+      } else {
+        previousAppUsage = currentAppUsage;
+        i++;
+      }
+    }
+
     setState(() {
       _appEvents = appEvents.reversed.toList();
-      _appUsages = (appUsages..sort()).reversed.toList();
+      _appUsages = appUsages.reversed.toList();
 
       //only show each Screen Locked that is longer than certain min. and the activity before it
       for (int i = 1; i < _appUsages.length; i++) {
@@ -263,9 +306,9 @@ class _MyAppState extends State<MyApp> {
         firstIdx = i;
       }
 
-      if ((isAfterStartTime || isBeforeEndTime)
-          && durationInSeconds > conciseMinTimeInSeconds
-          && firstIdx != -1) {
+      if ((isAfterStartTime || isBeforeEndTime) &&
+          durationInSeconds > conciseMinTimeInSeconds &&
+          firstIdx != -1) {
         copyText.add(_getAppModelTimeText(_appConciseUsages, i));
       }
     }

@@ -29,6 +29,8 @@ const List<String>
 const List<String> appNameExcludedList = [
   "Permission controller",
   "Pixel Launcher",
+  "Quickstep",
+  "System UI"
 ];
 
 const int conciseMinTimeInSeconds = 1200;
