@@ -1,3 +1,5 @@
+import 'package:flutter/material.dart';
+
 const Map<int, String> eventTypeMap = {
   1: "Activity Resumed",
   23: "Activity Stopped",
@@ -32,3 +34,7 @@ const List<String> appNameExcludedList = [
 const int conciseMinTimeInSeconds = 1200;
 
 const int daysOfEventsIncluded = 1;
+
+const copySessionStartTime = TimeOfDay(hour: 22, minute: 0); // 10:00 PM
+const copySessionEndTime =
+    TimeOfDay(hour: 9, minute: 0); // 9:00 AM the next day

@@ -240,25 +240,33 @@ class _MyAppState extends State<MyApp> {
 
   /// Copies all event times that are between [sessionStartTime] and [sessionEndTime] onto clipboard.
   void _handleCopyBtnOnclick() {
-    const sessionStartTime = TimeOfDay(hour: 22, minute: 0); // 10:00 PM
-    const sessionEndTime =
-        TimeOfDay(hour: 9, minute: 0); // 9:00 AM the next day
     final copyText = <String>[];
 
-    for (var index = _appConciseUsages.length - 1; index > 0; index--) {
-      final durationInSeconds = _appConciseUsages[index].durationInSeconds;
-      final activityStartTime = _appConciseUsages[index].time;
+    int firstIdx =
+        -1; // the first index of the event before sessionStartTime, used as a flag
 
-      final isAfterStartTime = activityStartTime.hour > sessionStartTime.hour ||
-          (activityStartTime.hour == sessionStartTime.hour &&
-              activityStartTime.minute > sessionStartTime.minute);
-      final isBeforeEndTime = activityStartTime.hour < sessionEndTime.hour ||
-          (activityStartTime.hour == sessionEndTime.hour &&
-              activityStartTime.minute < sessionEndTime.minute);
+    for (var i = _appConciseUsages.length - 1; i > 0; i--) {
+      final appUsageStartTime = _appConciseUsages[i].time;
+      final durationInSeconds = _appConciseUsages[i].durationInSeconds;
 
-      if (isAfterStartTime ||
-          isBeforeEndTime && durationInSeconds > conciseMinTimeInSeconds) {
-        copyText.add(_getAppModelTimeText(_appConciseUsages, index));
+      final isAfterStartTime =
+          appUsageStartTime.hour > copySessionStartTime.hour ||
+              (appUsageStartTime.hour == copySessionStartTime.hour &&
+                  appUsageStartTime.minute > copySessionStartTime.minute);
+      final isBeforeEndTime =
+          appUsageStartTime.hour < copySessionEndTime.hour ||
+              (appUsageStartTime.hour == copySessionEndTime.hour &&
+                  appUsageStartTime.minute < copySessionEndTime.minute);
+
+      if (isAfterStartTime && firstIdx == -1) {
+        // find the first index that is after 22:00
+        firstIdx = i;
+      }
+
+      if ((isAfterStartTime || isBeforeEndTime)
+          && durationInSeconds > conciseMinTimeInSeconds
+          && firstIdx != -1) {
+        copyText.add(_getAppModelTimeText(_appConciseUsages, i));
       }
     }
 
