@@ -9,6 +9,7 @@ import 'package:usage_stats/usage_stats.dart';
 import 'package:android_package_manager/android_package_manager.dart';
 
 import 'models/app_usage.dart';
+import 'utils.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -276,32 +277,8 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  String _getRoundedTimeString(DateTime dateTime) {
-    int minutes = dateTime.minute;
-    int roundedMinutes = (minutes / 5).round() * 5;
-    return DateTime(dateTime.year, dateTime.month, dateTime.day, dateTime.hour,
-            roundedMinutes)
-        .toIso8601String()
-        .substring(11, 16)
-        .split(':')
-        .join();
-  }
 
-  String _getAppModelTimeText(List<AppModel> data, int index) {
-    if (index < data.length - 1) {
-      // if the time difference between this event and previous event  time is less than 5 minutes
-      Duration duration = data[index + 1].time.difference(data[index].time);
-      if (duration.inMinutes < 5) {
-        // add five minutes toe this event start time
-        data[index].time = data[index].time.add(const Duration(minutes: 5));
-      }
-    }
 
-    var startTimeText = _getRoundedTimeString(data[index].time);
-    var endTimeText = _getRoundedTimeString(data[index - 1].time);
-
-    return '$startTimeText$endTimeText';
-  }
 
   /// Copies all event times that are between [sessionStartTime] and [sessionEndTime] onto clipboard.
   void _handleCopyBtnOnclick() async {
@@ -331,7 +308,7 @@ class _MyAppState extends State<MyApp> {
       if ((isAfterStartTime || isBeforeEndTime) &&
           durationInSeconds > conciseMinTimeInSeconds &&
           firstIdx != -1) {
-        copyText.add(_getAppModelTimeText(_appConciseUsages, i));
+        copyText.add(getAppModelTimeText(_appConciseUsages, i));
       }
     }
 
@@ -363,7 +340,7 @@ class _MyAppState extends State<MyApp> {
             onLongPress: () async {
               if (index >= 1 && _selectedIndex == 0) {
                 await Clipboard.setData(ClipboardData(
-                    text: _getAppModelTimeText(appModels, index)));
+                    text: getAppModelTimeText(appModels, index)));
               }
             },
             child: Padding(

@@ -36,6 +36,5 @@ const int conciseMinTimeInSeconds = 1200;
 
 const int daysOfEventsIncluded = 1;
 
-const copySessionStartTime = TimeOfDay(hour: 22, minute: 0); // 10:00 PM
-const copySessionEndTime =
-    TimeOfDay(hour: 9, minute: 0); // 9:00 AM the next day
+const copySessionStartTime = TimeOfDay(hour: 23, minute: 0);
+const copySessionEndTime = TimeOfDay(hour: 8, minute: 0);
