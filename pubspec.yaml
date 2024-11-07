@@ -10,6 +10,7 @@ dependencies:
   android_package_manager: ^0.7.0
   flutter:
     sdk: flutter
+  flutter_svg: ^2.0.13
   intl: ^0.19.0
   usage_stats: ^1.2.0
 
@@ -22,5 +23,5 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/default-icon.svg
-    - assets/lock-icon.svg
+    - assets/default-icon.png
+    - assets/lock-icon.png

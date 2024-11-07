@@ -21,9 +21,8 @@ const List<String>
     eventTypeForDurationList = //These four types are used in calculate duration
     [
   "Activity Resumed",
+  "Activity Paused",
   "Activity Stopped",
-  "Screen Non-Interactive",
-  "Keyguard Hidden"
 ];
 
 const List<String> appNameExcludedList = [

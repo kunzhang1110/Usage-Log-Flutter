@@ -25,7 +25,7 @@ class MyApp extends StatefulWidget {
 class _MyAppState extends State<MyApp> {
   List<AppEvent> _appEvents = [];
   List<AppUsage> _appUsages = [];
-  final List<AppUsage> _appConciseUsages = [];
+  List<AppUsage> _appConciseUsages = [];
   int _selectedIndex = 0;
   final AndroidPackageManager _packageManager = AndroidPackageManager();
   final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey =
@@ -104,15 +104,13 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
-  bool _isResumedOrNonInteractive(AppEvent appEvent) {
-    return appEvent.eventType == "Activity Resumed" ||
-        appEvent.eventType == "Screen Non-Interactive";
+  bool _isResumed(AppEvent appEvent) {
+    return appEvent.eventType == "Activity Resumed";
   }
 
-  bool _isPausedOrStoppedOrKeyguardHidden(AppEvent appEvent) {
+  bool _isPausedOrStopped(AppEvent appEvent) {
     return appEvent.eventType == "Activity Paused" ||
-        appEvent.eventType == "Activity Stopped" ||
-        appEvent.eventType == "Keyguard Hidden";
+        appEvent.eventType == "Activity Stopped";
   }
 
   Future<Uint8List> _loadIcon(String name) async {
@@ -144,6 +142,8 @@ class _MyAppState extends State<MyApp> {
     List<AppUsage> appConciseUsages = [];
     Map<String, List<AppEvent>> appNameToAppEventMap = {};
 
+    var defaultIcon = await _loadIcon("default-icon.png");
+    var lockIcon = await _loadIcon("lock-icon.png");
     // retrieve all events to appEvents and appNameToAppEventMap
     for (var event in queryEvents) {
       var packageName = event.packageName;
@@ -152,8 +152,8 @@ class _MyAppState extends State<MyApp> {
 
       var appEvent = AppEvent.empty();
       appEvent.eventType = eventType;
-      appEvent.time = DateTime.fromMillisecondsSinceEpoch(
-          int.parse(event.timeStamp!));
+      appEvent.time =
+          DateTime.fromMillisecondsSinceEpoch(int.parse(event.timeStamp!));
 
       try {
         var appName =
@@ -168,10 +168,10 @@ class _MyAppState extends State<MyApp> {
       try {
         appEvent.appIconByte = await _packageManager.getApplicationIcon(
                 packageName: packageName) ??
-            await _loadIcon("default-icon.svg");
+            defaultIcon;
       } catch (e) {
         print(e);
-        appEvent.appIconByte = await _loadIcon("default-icon.svg");
+        appEvent.appIconByte = defaultIcon;
       }
 
       if (eventTypeForDurationList.contains(eventType)) {
@@ -188,11 +188,10 @@ class _MyAppState extends State<MyApp> {
         for (int x = 0; x < events.length; x++) {
           var eventX = events[x];
 
-          if (_isResumedOrNonInteractive(eventX)) {
+          if (_isResumed(eventX)) {
             int y = x + 1;
 
-            while (y < events.length &&
-                _isPausedOrStoppedOrKeyguardHidden(events[y])) {
+            while (y < events.length && !_isPausedOrStopped(events[y])) {
               y++;
             }
 
@@ -203,8 +202,7 @@ class _MyAppState extends State<MyApp> {
 
               if (durationInSeconds > 0) {
                 var appUsage = AppUsage(
-                  appName:
-                      appName == "Android System" ? "Screen Locked" : appName,
+                  appName: appName,
                   appIconByte: eventX.appIconByte,
                   time: eventX.time,
                   durationInSeconds: durationInSeconds,
@@ -239,18 +237,42 @@ class _MyAppState extends State<MyApp> {
       }
     }
 
+    // calculate screen locked usage from app usages gaps
+    for (int i = 0; i < appUsages.length - 1; i++) {
+      AppUsage currentAppUsage = appUsages[i];
+      AppUsage nextAppUsage = appUsages[i + 1];
+
+      // Calculate the end time of the current app usage
+      DateTime currentAppUsageEndTime = currentAppUsage.time
+          .add(Duration(seconds: currentAppUsage.durationInSeconds));
+      Duration timeDiff = nextAppUsage.time.difference(currentAppUsageEndTime);
+
+      if (timeDiff.inSeconds > 1) {
+        // Create a new "Screen Locked" app usage entry
+        AppUsage screenLockedAppUsage = AppUsage(
+          appName: "Screen Locked",
+          durationInSeconds: timeDiff.inSeconds,
+          time: currentAppUsageEndTime,
+          appIconByte: lockIcon, // Placeholder for default icon if needed
+        );
+
+        // Insert the screen locked usage into the list
+        appUsages.insert(i + 1, screenLockedAppUsage);
+
+        // If the screen locked time is long enough, add to the concise list
+        if (screenLockedAppUsage.durationInSeconds >= conciseMinTimeInSeconds) {
+          appConciseUsages.add(screenLockedAppUsage);
+          appConciseUsages.add(nextAppUsage);
+        }
+
+        i++; // Skip next iteration to avoid duplication
+      }
+    }
+
     setState(() {
       _appEvents = appEvents.reversed.toList();
       _appUsages = appUsages.reversed.toList();
-
-      //only show each Screen Locked that is longer than certain min. and the activity before it
-      for (int i = 1; i < _appUsages.length; i++) {
-        if (_appUsages[i].appName == "Screen Locked" &&
-            (_appUsages[i].durationInSeconds >= conciseMinTimeInSeconds)) {
-          _appConciseUsages.add(_appUsages[i - 1]);
-          _appConciseUsages.add(_appUsages[i]);
-        }
-      }
+      _appConciseUsages = appConciseUsages.reversed.toList();
     });
   }
 
@@ -282,7 +304,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   /// Copies all event times that are between [sessionStartTime] and [sessionEndTime] onto clipboard.
-  void _handleCopyBtnOnclick() {
+  void _handleCopyBtnOnclick() async {
     final copyText = <String>[];
 
     int firstIdx =
@@ -314,7 +336,7 @@ class _MyAppState extends State<MyApp> {
     }
 
     final clipboardData = ClipboardData(text: copyText.join(' '));
-    Clipboard.setData(clipboardData);
+    await Clipboard.setData(clipboardData);
   }
 
   Widget _buildListView() {
@@ -352,7 +374,7 @@ class _MyAppState extends State<MyApp> {
                 mainAxisAlignment: MainAxisAlignment.start,
                 mainAxisSize: MainAxisSize.max,
                 children: [
-                  Text(appModels[index].time.toString().substring(0, 16)),
+                  Text(appModels[index].time.toString().substring(0, 19)),
                   const SizedBox(
                     width: 25,
                   ),
