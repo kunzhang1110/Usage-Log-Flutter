@@ -277,37 +277,43 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-
-
-
   /// Copies all event times that are between [sessionStartTime] and [sessionEndTime] onto clipboard.
   void _handleCopyBtnOnclick() async {
     final copyText = <String>[];
 
-    int firstIdx =
-        -1; // the first index of the event before sessionStartTime, used as a flag
+    final DateTime firstStartDateTime = _appConciseUsages.last.time;
+    final DateTime referenceDateTime = DateTime(
+      firstStartDateTime.year,
+      firstStartDateTime.month,
+      firstStartDateTime.day,
+      0,
+      0,
+    );
 
     for (var i = _appConciseUsages.length - 1; i > 0; i--) {
-      final appUsageStartTime = _appConciseUsages[i].time;
+      final appUsageStartDateTime = _appConciseUsages[i].time;
       final durationInSeconds = _appConciseUsages[i].durationInSeconds;
 
-      final isAfterStartTime =
-          appUsageStartTime.hour > copySessionStartTime.hour ||
-              (appUsageStartTime.hour == copySessionStartTime.hour &&
-                  appUsageStartTime.minute > copySessionStartTime.minute);
-      final isBeforeEndTime =
-          appUsageStartTime.hour < copySessionEndTime.hour ||
-              (appUsageStartTime.hour == copySessionEndTime.hour &&
-                  appUsageStartTime.minute < copySessionEndTime.minute);
+      final DateTime sessionStartDateTime = DateTime(
+        referenceDateTime.year,
+        referenceDateTime.month,
+        referenceDateTime.day,
+        copySessionStartTime.hour,
+        copySessionStartTime.minute,
+      );
 
-      if (isAfterStartTime && firstIdx == -1) {
-        // find the first index that is after 22:00
-        firstIdx = i;
-      }
+      final DateTime sessionEndDateTime = DateTime(
+        referenceDateTime.year,
+        referenceDateTime.month,
+        referenceDateTime.day + 1,
+        copySessionEndTime.hour,
+        copySessionEndTime.minute,
+      );
 
-      if ((isAfterStartTime || isBeforeEndTime) &&
-          durationInSeconds > conciseMinTimeInSeconds &&
-          firstIdx != -1) {
+      final bool isInCopySession = appUsageStartDateTime.isAfter(sessionStartDateTime) &&
+          appUsageStartDateTime.isBefore(sessionEndDateTime);
+
+      if (isInCopySession && durationInSeconds > conciseMinTimeInSeconds) {
         copyText.add(getAppModelTimeText(_appConciseUsages, i));
       }
     }
@@ -339,8 +345,8 @@ class _MyAppState extends State<MyApp> {
           return InkWell(
             onLongPress: () async {
               if (index >= 1 && _selectedIndex == 0) {
-                await Clipboard.setData(ClipboardData(
-                    text: getAppModelTimeText(appModels, index)));
+                await Clipboard.setData(
+                    ClipboardData(text: getAppModelTimeText(appModels, index)));
               }
             },
             child: Padding(
