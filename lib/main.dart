@@ -220,24 +220,6 @@ class _MyAppState extends State<MyApp> {
 
     appUsages.sort();
 
-    // merge  consecutive activities with the same name
-    AppUsage? previousAppUsage;
-    for (int i = 0; i < appUsages.length;) {
-      AppUsage currentAppUsage = appUsages[i];
-
-      if (previousAppUsage != null &&
-          previousAppUsage.appName == currentAppUsage.appName) {
-        previousAppUsage.durationInSeconds =
-            previousAppUsage.durationInSeconds +
-                currentAppUsage.durationInSeconds;
-
-        appUsages.removeAt(i);
-      } else {
-        previousAppUsage = currentAppUsage;
-        i++;
-      }
-    }
-
     // calculate screen locked usage from app usages gaps
     for (int i = 0; i < appUsages.length - 1; i++) {
       AppUsage currentAppUsage = appUsages[i];
