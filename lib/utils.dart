@@ -1,6 +1,6 @@
 import 'models/app_model.dart';
 
-String getRoundedTimeString(DateTime dateTime) {
+String roundedTimeString(DateTime dateTime) {
   int minutes = dateTime.minute;
   int roundedMinutes = (minutes ~/ 5) * 5;
   return DateTime(dateTime.year, dateTime.month, dateTime.day, dateTime.hour,
@@ -11,21 +11,20 @@ String getRoundedTimeString(DateTime dateTime) {
       .join();
 }
 
-String getAppModelTimeText(List<AppModel> data, int index) {
+String appModelTimeText(List<AppModel> data, int index) {
   var startTime = data[index].time;
   var endTime = data[index - 1].time;
 
   if (index < data.length - 1) {
-    // if the time difference between this event and previous event  time is less than 5 minutes
+    // Nudge start time forward when this event is within 5 minutes of the next.
     Duration duration = startTime.difference(data[index + 1].time);
     if (duration.inMinutes < 5) {
-      // add five minutes to this event start time
       startTime = data[index].time.add(const Duration(minutes: 5));
     }
   }
 
-  var startTimeText = getRoundedTimeString(startTime);
-  var endTimeText = getRoundedTimeString(endTime);
+  var startTimeText = roundedTimeString(startTime);
+  var endTimeText = roundedTimeString(endTime);
 
   return '$startTimeText$endTimeText';
 }

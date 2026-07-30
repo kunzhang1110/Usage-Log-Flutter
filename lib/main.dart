@@ -6,7 +6,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:usage_stats/usage_stats.dart';
-import 'package:android_package_manager/android_package_manager.dart';
 
 import 'models/app_usage.dart';
 import 'utils.dart';
@@ -28,10 +27,15 @@ class _MyAppState extends State<MyApp> {
   List<AppUsage> _appUsages = [];
   List<AppUsage> _appConciseUsages = [];
   int _selectedIndex = 0;
-  final AndroidPackageManager _packageManager = AndroidPackageManager();
+  bool _isSearching = false;
+  String _searchQuery = '';
+  static const MethodChannel _appInfoChannel =
+      MethodChannel('usage_log/app_info');
   final GlobalKey<RefreshIndicatorState> _refreshIndicatorKey =
       GlobalKey<RefreshIndicatorState>();
-  final ScrollController _controller = ScrollController();
+  final PageController _pageController = PageController();
+  final List<ScrollController> _scrollControllers =
+      List.generate(3, (_) => ScrollController());
 
   @override
   void initState() {
@@ -42,65 +46,119 @@ class _MyAppState extends State<MyApp> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    var content = _buildListView();
+  void dispose() {
+    _pageController.dispose();
+    for (final controller in _scrollControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      theme: _buildTheme(Brightness.light),
+      darkTheme: _buildTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
       home: Scaffold(
         appBar: AppBar(
-          title: const Text("Usage Log"),
+          title: _isSearching
+              ? TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Filter by app',
+                    border: InputBorder.none,
+                  ),
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                )
+              : const Text("Usage Log"),
           actions: [
-            _selectedIndex == 0
-                ? IconButton(
-                    onPressed: _handleCopyBtnOnclick,
-                    icon: const Icon(Icons.copy))
-                : const SizedBox()
+            if (_isSearching)
+              IconButton(
+                onPressed: () => setState(() {
+                  _isSearching = false;
+                  _searchQuery = '';
+                }),
+                icon: const Icon(Icons.close),
+              )
+            else ...[
+              IconButton(
+                onPressed: () => setState(() => _isSearching = true),
+                icon: const Icon(Icons.search),
+              ),
+              if (_selectedIndex == 0)
+                IconButton(
+                  onPressed: _handleCopyPressed,
+                  icon: const Icon(Icons.copy),
+                ),
+            ],
           ],
         ),
-        body: RefreshIndicator(
-          key: _refreshIndicatorKey,
-          onRefresh: _updateData,
-          child: Center(
-            child: content,
-          ),
+        // Swipe left/right to switch tabs; kept in sync with the nav bar.
+        body: PageView(
+          controller: _pageController,
+          onPageChanged: (index) => setState(() => _selectedIndex = index),
+          children: [
+            _buildRefreshableList(0, _filterByApp(_appConciseUsages),
+                refreshKey: _refreshIndicatorKey),
+            _buildRefreshableList(1, _filterByApp(_appUsages)),
+            _buildRefreshableList(2, _filterByApp(_appEvents)),
+          ],
         ),
         floatingActionButton: FloatingActionButton(
           onPressed: () {
-            _controller.animateTo(
-              0.0,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeInOut,
-            );
+            final controller = _scrollControllers[_selectedIndex];
+            if (controller.hasClients) {
+              controller.animateTo(
+                0.0,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+              );
+            }
           },
-          mini: true,
-          child: const Icon(
-            Icons.arrow_upward,
-          ),
+          child: const Icon(Icons.arrow_upward),
         ),
-        bottomNavigationBar: BottomNavigationBar(
-          items: const <BottomNavigationBarItem>[
-            BottomNavigationBarItem(
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (index) => _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+          ),
+          destinations: const [
+            NavigationDestination(
               icon: Icon(Icons.summarize),
               label: 'Concise',
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.topic),
+            NavigationDestination(
+              icon: Icon(Icons.apps),
               label: 'All',
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.stacked_bar_chart),
+            NavigationDestination(
+              icon: Icon(Icons.receipt_long),
               label: 'Raw',
             ),
           ],
-          currentIndex: _selectedIndex,
-          selectedItemColor: Colors.amber[800],
-          onTap: (int index) {
-            setState(() {
-              _selectedIndex = index;
-            });
-          },
         ),
+      ),
+    );
+  }
+
+  ThemeData _buildTheme(Brightness brightness) {
+    final colorScheme =
+        ColorScheme.fromSeed(seedColor: Colors.indigo, brightness: brightness);
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      // Keep the top bar the same color as the bottom NavigationBar, and stop
+      // it from re-tinting when content scrolls underneath.
+      appBarTheme: AppBarTheme(
+        backgroundColor: colorScheme.surfaceContainer,
+        scrolledUnderElevation: 0,
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: colorScheme.surfaceContainer,
       ),
     );
   }
@@ -114,10 +172,26 @@ class _MyAppState extends State<MyApp> {
         appEvent.eventType == "Activity Stopped";
   }
 
-  Future<Uint8List> _loadIcon(String name) async {
-    // Replace with actual logic to load a default icon from assets
-    final ByteData data = await rootBundle.load('assets/$name');
-    return data.buffer.asUint8List();
+  /// Resolves the label and icon for [packageNames] via the native channel.
+  /// Packages that can't be resolved are simply absent from the result.
+  Future<Map<String, _AppInfo>> _loadAppInfos(Set<String> packageNames) async {
+    final infos = <String, _AppInfo>{};
+    try {
+      final raw = await _appInfoChannel.invokeMethod<Map<Object?, Object?>>(
+        'getAppInfos',
+        packageNames.toList(),
+      );
+      raw?.forEach((key, value) {
+        final info = (value as Map).cast<Object?, Object?>();
+        infos[key as String] = _AppInfo(
+          label: info['label'] as String?,
+          icon: info['icon'] as Uint8List?,
+        );
+      });
+    } catch (e) {
+      debugPrint('$e');
+    }
+    return infos;
   }
 
   Future<void> _updateData() async {
@@ -143,37 +217,29 @@ class _MyAppState extends State<MyApp> {
     List<AppUsage> appConciseUsages = [];
     Map<String, List<AppEvent>> appNameToAppEventMap = {};
 
-    var defaultIcon = await _loadIcon("default-icon.png");
-    var lockIcon = await _loadIcon("lock-icon.png");
-    // retrieve all events to appEvents and appNameToAppEventMap
+    // Resolve the label and icon for each distinct package once, in a single
+    // native call, instead of two channel round-trips per usage event.
+    final packageNames = <String>{
+      for (var event in queryEvents)
+        if (event.packageName != null) event.packageName!,
+    };
+    final appInfos = await _loadAppInfos(packageNames);
+
     for (var event in queryEvents) {
       var packageName = event.packageName;
       var eventType = eventTypeMap[int.parse(event.eventType!)];
       if (eventType == null || packageName == null) continue;
 
+      final info = appInfos[packageName];
+      final appName = info?.label ?? packageName;
+      if (appNameExcludedList.contains(appName)) continue;
+
       var appEvent = AppEvent.empty();
       appEvent.eventType = eventType;
       appEvent.time =
           DateTime.fromMillisecondsSinceEpoch(int.parse(event.timeStamp!));
-
-      try {
-        var appName =
-            await _packageManager.getApplicationLabel(packageName: packageName);
-        if (appNameExcludedList.contains(appName)) continue;
-        appEvent.appName = appName ?? packageName;
-      } catch (e) {
-        print(e);
-        appEvent.appName = packageName;
-      }
-
-      try {
-        appEvent.appIconByte = await _packageManager.getApplicationIcon(
-                packageName: packageName) ??
-            defaultIcon;
-      } catch (e) {
-        print(e);
-        appEvent.appIconByte = defaultIcon;
-      }
+      appEvent.appName = appName;
+      appEvent.appIconByte = info?.icon;
 
       if (eventTypeForDurationList.contains(eventType)) {
         appNameToAppEventMap
@@ -225,24 +291,20 @@ class _MyAppState extends State<MyApp> {
       AppUsage currentAppUsage = appUsages[i];
       AppUsage nextAppUsage = appUsages[i + 1];
 
-      // Calculate the end time of the current app usage
       DateTime currentAppUsageEndTime = currentAppUsage.time
           .add(Duration(seconds: currentAppUsage.durationInSeconds));
       Duration timeDiff = nextAppUsage.time.difference(currentAppUsageEndTime);
 
       if (timeDiff.inSeconds > 1) {
-        // Create a new "Screen Locked" app usage entry
         AppUsage screenLockedAppUsage = AppUsage(
           appName: "Screen Locked",
           durationInSeconds: timeDiff.inSeconds,
           time: currentAppUsageEndTime,
-          appIconByte: lockIcon, // Placeholder for default icon if needed
+          appIconByte: null,
         );
 
-        // Insert the screen locked usage into the list
         appUsages.insert(i + 1, screenLockedAppUsage);
 
-        // If the screen locked time is long enough, add to the concise list
         if (screenLockedAppUsage.durationInSeconds >= conciseMinTimeInSeconds) {
           appConciseUsages.add(screenLockedAppUsage);
           appConciseUsages.add(nextAppUsage);
@@ -259,8 +321,9 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  /// Copies all event times that are between [sessionStartTime] and [sessionEndTime] onto clipboard.
-  void _handleCopyBtnOnclick() async {
+  /// Copies the times of concise activities that fall within the configured
+  /// copy session (copySessionStartTime–copySessionEndTime) to the clipboard.
+  void _handleCopyPressed() async {
     final copyText = <String>[];
 
     final DateTime firstStartDateTime = _appConciseUsages.last.time;
@@ -296,7 +359,7 @@ class _MyAppState extends State<MyApp> {
           appUsageStartDateTime.isBefore(sessionEndDateTime);
 
       if (isInCopySession && durationInSeconds > conciseMinTimeInSeconds) {
-        copyText.add(getAppModelTimeText(_appConciseUsages, i));
+        copyText.add(appModelTimeText(_appConciseUsages, i));
       }
     }
 
@@ -304,92 +367,116 @@ class _MyAppState extends State<MyApp> {
     await Clipboard.setData(clipboardData);
   }
 
-  Widget _buildListView() {
-    List<AppModel> appModels = [];
-
-    if (_selectedIndex == 0) {
-      appModels = _appConciseUsages;
-    }
-
-    if (_selectedIndex == 1) {
-      appModels = _appUsages;
-    }
-
-    if (_selectedIndex == 2) {
-      appModels = _appEvents;
-    }
-
-    return ListView.separated(
-        controller: _controller,
-        separatorBuilder: (context, index) => const Divider(),
-        itemCount: appModels.length,
-        itemBuilder: (context, index) {
-          return InkWell(
-            onLongPress: () async {
-              if (index >= 1 && _selectedIndex == 0) {
-                await Clipboard.setData(
-                    ClipboardData(text: getAppModelTimeText(appModels, index)));
-              }
-            },
-            child: Padding(
-              padding: _selectedIndex == 2
-                  ? const EdgeInsets.fromLTRB(45, 5, 0, 5)
-                  : const EdgeInsets.symmetric(horizontal: 45, vertical: 5),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.start,
-                mainAxisSize: MainAxisSize.max,
-                children: [
-                  Text(appModels[index].time.toString().substring(0, 19)),
-                  const SizedBox(
-                    width: 25,
-                  ),
-                  appModels[index].appIconByte != null
-                      ? Image.memory(
-                          appModels[index].appIconByte!,
-                          width: 35,
-                          height: 35,
-                        )
-                      : const Text(""),
-                  const SizedBox(
-                    width: 25,
-                  ),
-                  Expanded(
-                    child: Builder(
-                      builder: (context) {
-                        Widget? subText;
-                        if (_selectedIndex == 0 || _selectedIndex == 1) {
-                          var appUsage = appModels[index] as AppUsage;
-                          subText = Text(
-                            "${appUsage.durationInText}",
-                            style: TextStyle(
-                                color: appUsage.durationInSeconds >
-                                        conciseMinTimeInSeconds //if duration longer than 30 minutes make font red
-                                    ? Colors.red
-                                    : Colors.black),
-                          );
-                        }
-                        if (_selectedIndex == 2) {
-                          var appEvent = appModels[index] as AppEvent;
-                          subText = Text(
-                            "${appEvent.eventType}",
-                            overflow: TextOverflow.visible,
-                          );
-                        }
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(appModels[index].appName),
-                            if (subText != null) subText
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        });
+  /// Filters [models] to those whose app name contains the search query.
+  List<T> _filterByApp<T extends AppModel>(List<T> models) {
+    if (_searchQuery.isEmpty) return models;
+    final query = _searchQuery.toLowerCase();
+    return models
+        .where((model) => model.appName.toLowerCase().contains(query))
+        .toList();
   }
+
+  Widget _buildRefreshableList(int tabIndex, List<AppModel> appModels,
+      {Key? refreshKey}) {
+    return RefreshIndicator(
+      key: refreshKey,
+      onRefresh: _updateData,
+      child: _buildListView(tabIndex, appModels),
+    );
+  }
+
+  Widget _buildListView(int tabIndex, List<AppModel> appModels) {
+    return ListView.separated(
+      controller: _scrollControllers[tabIndex],
+      separatorBuilder: (context, index) =>
+          const Divider(height: 1, indent: 16, endIndent: 16),
+      itemCount: appModels.length,
+      itemBuilder: (context, index) {
+        final theme = Theme.of(context);
+        final appModel = appModels[index];
+
+        // Highlight long sessions (name + duration) in red, matching Android.
+        final bool highlight = appModel is AppUsage &&
+            appModel.durationInSeconds > conciseMinTimeInSeconds;
+        final Color mutedColor = theme.colorScheme.onSurfaceVariant;
+        final Color? nameColor = highlight ? Colors.red : null;
+
+        Widget? subText;
+        if (appModel is AppUsage) {
+          subText = Text(
+            appModel.durationInText ?? '',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: highlight ? Colors.red : mutedColor),
+          );
+        } else if (appModel is AppEvent) {
+          subText = Text(
+            appModel.eventType ?? '',
+            style: theme.textTheme.bodySmall?.copyWith(color: mutedColor),
+          );
+        }
+
+        // Screen Locked and unresolved apps use themed Material icons so they
+        // stay visible in both light and dark mode; real app icons are bitmaps.
+        final Widget iconWidget;
+        if (appModel.appName == "Screen Locked") {
+          iconWidget = Icon(Icons.lock_outline,
+              size: 35, color: theme.colorScheme.onSurface);
+        } else if (appModel.appIconByte != null &&
+            appModel.appIconByte!.isNotEmpty) {
+          iconWidget =
+              Image.memory(appModel.appIconByte!, width: 35, height: 35);
+        } else {
+          iconWidget =
+              Icon(Icons.android, size: 35, color: mutedColor);
+        }
+
+        return InkWell(
+          onLongPress: () async {
+            if (index >= 1) {
+              await Clipboard.setData(
+                  ClipboardData(text: appModelTimeText(appModels, index)));
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 112,
+                  child: Text(
+                    appModel.time.toString().substring(0, 16),
+                    style: theme.textTheme.bodySmall?.copyWith(color: mutedColor),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                iconWidget,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        appModel.appName,
+                        style:
+                            theme.textTheme.bodyLarge?.copyWith(color: nameColor),
+                      ),
+                      if (subText != null) subText,
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AppInfo {
+  _AppInfo({required this.label, required this.icon});
+
+  final String? label;
+  final Uint8List? icon;
 }

@@ -10,7 +10,7 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <application
-        android:label="usage_log_flutter"
+        android:label="Usage Log"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

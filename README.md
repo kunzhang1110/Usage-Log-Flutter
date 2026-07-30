@@ -1,48 +1,32 @@
 # Usage Log
-
-Usage Log provides an easy way to check app usage on an Android phone.
-The app is built using Flutter, which is a port from its Android Native
-counterpart.
+Usage Log provides an easy way to check app usage on an Android phone. The app is built using **Flutter**, ported from its Android Native counterpart.
 
 ## Description
+Usage Log converts `UsageStatsManager` event data and calculates how long each app has been used. The results are shown in three human-readable formats:
+- **Concise** — shows only long "Screen Locked" gaps and the activity after each.
+- **All** — shows every app's usage duration (excluding system apps).
+- **Raw** — shows all raw events with their associated package names.
 
-Usage Log converts UsageStatsManager event data and calculates how long
-an app has been used. The results are displayed in human-readable
-formats, as follows:
+Switch between formats with the **bottom navigation bar**, or **swipe left and right**. In the Concise and All formats, activities lasting **longer than 20 minutes** are highlighted in red.
 
-| **Format** | **Descriptions**                                           |
-|------------|------------------------------------------------------------|
-| All        | shows all Apps' usage duration (excluding system apps).    |
-| Concise    | shows only “Screen Locked” activities and their durations. |
-| Raw        | shows all raw events with their associated package names.  |
+Tap the **search icon** in the app bar to filter the current list by app name.
 
-Users can switch between these formats easily with top navigation
-buttons. In both “Concise” and “All” formats, activities with durations
-exceeding 20 minutes are highlighted in red.
+**Pull down** to refresh the list with new entries.
 
-Swiping down will update the content with new entries.
+**Long-press** an activity to copy its start and end time to the clipboard in `hhmmhhmm` format. For example, an activity from 11:00 to 14:00 copies as `11001400`.
 
-Long pressing on an activity will copy the start time and end time of
-the activity to clipboard in the format of “hhmmhhmm”. For example for
-an activity starting from 11:00 to 14:00, the copied text is "06000830”.
+Tap the **floating button** at the bottom right to scroll back to the top.
 
-Pressing on the bottom right floating button will scroll to the top of
-the list.
+The interface uses **Material 3** and follows the **system light or dark theme**.
 
-<img src="_imgs/media/image1.png"
-style="width:7.66025in;height:5.00348in" />
+![Usage Log showing the Concise, All, and Raw formats](_imgs/screenshots.png)
 
+---
 ## Getting Started
-
-Find build\app\outputs\flutter-apk\app-release.apk and install it. Grant
-permissions as described below and refresh the screen by swiping down.
+Build the app and install `build/app/outputs/flutter-apk/app-release.apk`. Grant the permissions below, then refresh the screen by pulling down.
 
 ### Permissions
+- `PACKAGE_USAGE_STATS` — required for the `UsageStatsManager` API.
+- `QUERY_ALL_PACKAGES` — required to read app names and icons for all installed apps.
 
-PACKAGE_USAGE_STATS is required for using UsageStatsManager API and
-QUERY_ALL_PACKAGES is required for getting App icons for all installed
-apps.
-
-Users need to grant these two permissions on their phones by navigating
-to Settings \> Special app access \> Usage Access, find the app name and
-toggle it on.
+Grant these on the phone under Settings > Special app access > Usage Access: find the app and toggle it on.

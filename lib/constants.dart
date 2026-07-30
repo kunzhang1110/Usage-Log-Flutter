@@ -17,9 +17,8 @@ const Map<int, String> eventTypeMap = {
   7: "User Interaction",
 };
 
-const List<String>
-    eventTypeForDurationList = //These four types are used in calculate duration
-    [
+// Event types used to calculate usage duration.
+const List<String> eventTypeForDurationList = [
   "Activity Resumed",
   "Activity Paused",
   "Activity Stopped",
